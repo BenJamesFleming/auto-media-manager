@@ -1,0 +1,21 @@
+<table width="100%" border="0" cellspacing="0" cellpadding="20" style="background: #ecf0f1;max-width:650px;">
+<tr>
+<td style="background: rgba(255,255,255,0.4)">
+
+  <h2 style="margin: 80px 0px 10px 0px;color: #333;font-size:50px;text-align:center;">{name}</h2>
+  <h3 style="margin: 10px 0px 80px 0px;color: #333;font-size:25px;text-align:center;">{season} | {episode}</h3>
+
+</td>
+</tr>
+</table>
+
+<table width="100%" border="0" cellspacing="0" cellpadding="20" style="background: #ecf0f1;max-width:650px;">
+<tr>
+<td>
+
+  <hr style="height: 2px;background: #333;border: 0px;">
+  <p style="margin: 5px 0px;color: #333;font-size:12px;">Automatic Message From Python.</p>
+
+</td>
+</tr>
+</table>

@@ -1,0 +1,24 @@
+{
+  "debug": "True",
+  "email": {
+    "send": "True",
+    "sender": "",
+    "password": "",
+    "recipient": ""
+  },
+  "basedir": "",
+  "movedir": "",
+  "dirformat": "_",
+  "fileextentions": [
+    ".mkv",
+    ".mp4",
+    ".avi"
+  ],
+  "nameformats": [
+    " ",
+    "_",
+    ".",
+    ""
+  ],
+  "shows": []
+}
