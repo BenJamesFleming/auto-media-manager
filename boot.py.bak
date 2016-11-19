@@ -22,7 +22,6 @@ can_acces = False
 max_loop = 10
 debug = 'True'
 email = 'False'
-uTorrentConfig = ''
 baseDir = ''
 moveDir = ''
 dirFormat = '_'
