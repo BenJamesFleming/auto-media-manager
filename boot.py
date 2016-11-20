@@ -7,14 +7,14 @@ import os
 import sys
 import json
 import time
+import glob
 import random
 import smtplib
 from pytvdbapi import api
 from pytvdbapi.error import ConnectionError, BadData, TVDBIndexError
-from watchdog.observers import Observer
-from watchdog.events import PatternMatchingEventHandler
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+import datetime
 
 # Global Variables
 config_file = 'config_local.json'
@@ -37,6 +37,13 @@ name_formats = [
     ''
 ]
 
+# Get Variables Parsed From uTorrent
+torrentHash = sys.argv(1)
+torrentName = sys.argv(2)
+
+# SetUp Date
+now = datetime.datetime.now()
+
 # Check for Config.json file
 if os.path.isfile(config_file):
 
@@ -45,15 +52,15 @@ if os.path.isfile(config_file):
 
         # Load json
         jsonData = json.load(data_file)
-        debug = jsonData['debug']
         email = jsonData['email']
         uTorrentConfig = jsonData['uTorrent']
-        baseDir = jsonData['basedir']
         moveDir = jsonData['movedir']
         dirFormat = jsonData['dirformat']
         fileExtentions = jsonData['fileextentions']
         name_formats = jsonData['nameformats']
-        shows = jsonData['shows']
+        for show in jsonData['shows'].split('|'):
+            show = show.split(';');
+            shows.append([show[0], (len(show) == 2 ? show[1] : None)])
 
 # if no config.json is found run error
 else:
@@ -66,301 +73,13 @@ watchArray = []
 con = Connection(uTorrentConfig["host"], uTorrentConfig["username"], uTorrentConfig["password"])
 utorrent = Falcon(con, con.utorrent())
 
-# Handle watchdog events
-class HandleFileEvents(PatternMatchingEventHandler):
-
-    # Set patterns as the watchArray
-    patterns = watchArray
-
-    # process event
-    def process(self, event):
-
-        # Check that event type == 'created'
-        if event.event_type == 'created':
-
-            # If debug is 'True' print new file
-            if debug == 'True':
-                print("File Added: "+event.src_path)
-
-            # Get name with self.get_name()
-            name = self.get_name(event)
-
-            # Get season with self.get_substring()
-            season = self.get_substring(event, [1,4])
-            # Format season with self.format_season()
-            season = self.format_season(event, season)
-
-            # Get episode with self.get_substring()
-            episode = self.get_substring(event, [4,7])
-            # Format episode with self.format_season()
-            episode = self.format_season(event, episode)
-
-            # Get file extention with self.get_substring()
-            extention = self.get_substring(event, [-4,'null'])
-
-            # Build tempMoveDir string with show info
-            tempMoveDir = moveDir+name['dir'].replace(" ",dirFormat).replace("__space__", " ")+'/Season_'+season[1]+'/'
-
-            # If debug is 'True' print show info
-            if debug == 'True':
-                print("Name: "+name['name'])
-                print("Season: "+season[0])
-                print("Episode: "+episode[0])
-                print("Extention: "+extention)
-                print("Moved To: "+tempMoveDir)
-
-            # Check that the file is openable
-            for i in range(0, max_loop):
-
-                # Try open the file
-                try:
-                    with open(event.src_path, 'rb') as _:
-                        can_access = True
-                        break
-
-                # On KeyboardInterrupt break loop
-                except KeyboardInterrupt:
-                    break
-
-                # If file is not openable sleep for 3 seconds
-                except IOError:
-                    time.sleep(3)
-
-            # If the program can access the continue
-            if can_access:
-
-                # Build file_name string
-                file_name = name['name'].replace(" ", ".")+"."+season[0]+episode[0]+extention
-
-                # Rename file and move it to new direcotry
-                if os.path.isdir(tempMoveDir) is not True: os.makedirs(tempMoveDir)
-                os.rename(event.src_path, tempMoveDir+file_name)
-
-                # If email['send'] == 'True' send email
-                if email['send'] == 'True':
-
-                    # Connect to TVDB and grab show info
-                    db = api.TVDB('36139F469F704416', ignore_case=True, banners=True)
-
-                    db_worked = True
-
-                    imdb_id = ""
-                    rating = ""
-                    banner = None
-                    fanart = None
-                    ep_name = ""
-
-                    email_body = None
-
-                    # Try grab show info
-                    try:
-                        result = db.search(name['name'], 'en')
-                        show = result[0]
-                        show.update()
-
-                    # The search did not generate any hits
-                    except TVDBIndexError:
-                        db_worked = False
-
-                    # Handle the fact that the server is not responding
-                    except ConnectionError:
-                        db_worked = False
-
-                    # The server responded but did not provide valid XML data
-                    except BadData:
-                        db_worked = False
-
-                    else:
-                        # Get episo from show
-                        ep = show[int(season[1])][int(episode[1])]
-
-                        # Get IMDB ID
-                        imdb_id = show.IMDB_ID
-
-                        # Get Rating
-                        rating = show.Rating
-
-                        # Get Banner Objects
-                        banner = show.banner_objects[0]
-
-                        # Extract fanart from banner objects
-                        fanart = [b for b in show.banner_objects if b.BannerType == "fanart"]
-                        fanart = fanart[random.randint(0,len(fanart)-1)].banner_url
-
-                        # Get EpisodeName
-                        ep_name = ep.EpisodeName
-
-                        # Load show vars into object
-                        template_vars = {
-                            'name': name['name'],
-                            'season': season[0],
-                            'episode': episode[0],
-                            'episodename': ep_name,
-                            'rating': rating,
-                            'IMDBID': imdb_id,
-                            'backgroundurl': fanart
-                        }
-
-                        # Try open email tempalte and adding vars
-                        try:
-                            with open('email/email_01_tvdb.txt') as email_template:
-                                email_body = email_template.read().format(**template_vars)
-
-                        # On except pass
-                        except:
-                            pass
-
-                    # If email failed to load, Load backup
-                    if db_worked is False:
-
-                        # Load show vars into object
-                        template_vars = {
-                            'name': name['name'],
-                            'season': season[0],
-                            'episode': episode[0]
-                        }
-
-                        # Try open email tempalte and adding vars
-                        try:
-                            with open('email/email_01_no_tvdb.txt') as email_template:
-                                email_body = email_template.read().format(**template_vars)
-
-                        # On except pass
-                        except:
-                            pass
-
-                    # Make sure an email has been built
-                    if email_body is not None:
-                        # Build the subect string
-                        subject = "New '"+name['name']+"' Episode | "+season[0]+episode[0]
-
-                        # Send email
-                        send_email(email["sender"], email["password"], email["recipient"], subject, email_body)
-
-                # If the program can not access the file
-                else:
-
-                    # Print no access error
-                    print("Error: The file can not be accessed by the program")
-
-            # Print Done
-            print("Done\n")
-
-    # When file created process
-    def on_created(self, event):
-        self.process(event)
-
-    # Format Season into [Lond, Short]
-    def format_season(self, event, string):
-        if string[1] == '0':
-            return [string, string[2:]]
-        else:
-            return [string, string[1:]]
-
-    # Format name
-    def get_name(self, event):
-
-        # Get path
-        string = event.src_path
-
-        # Trim off baseDir
-        string = string.replace(baseDir, "")
-
-        # Loop through shows
-        for show in shows:
-
-            # Loop through name_formats
-            for nameformat in name_formats:
-
-                # Format name with nameformat
-                showName = show['name'].replace(" ", nameformat)
-
-                # Try find showName in string
-                try:
-                    if string.index(showName) > -1:
-                        return show
-
-                # On ValueError pass
-                except ValueError:
-                    pass
-
-    # Get substring (detail) of name
-    def get_substring(self, event, substring):
-
-        # Get path and trim off baseDir
-        path = event.src_path.replace(baseDir, "")
-
-        # Get name
-        baseName = self.get_name(event)['name']
-
-        # Loop through name_formats
-        for nameformat in name_formats:
-
-            # Format name with nameformat
-            showName = baseName.replace(" ", nameformat)
-
-            # Try find showName in path
-            try:
-                if path.index(showName) > -1:
-
-                    # Trim off showName in path
-                    path = path.replace(showName, "")
-                    if substring[1] != 'null':
-                        return path[substring[0]:substring[1]]
-                    else:
-                        return path[substring[0]:]
-
-            # On ValueError pass
-            except ValueError:
-                pass
-
-# Send email via smpt.gmail.com
-def send_email(user, pwd, recipient, subject, body):
-
-    # Build message
-    msg = MIMEMultipart('alternative')
-    # Set Subject
-    msg['Subject'] = subject
-    # Set From
-    msg['From'] = user
-    # Set To
-    msg['To'] = recipient
-
-    # Attach email to message
-    msg.attach(MIMEText(body, 'html'))
-
-    # Try to send email
-    try:
-        # Connect to smpt.gmail.com on port 587
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        # Send EHLO command
-        server.ehlo()
-        # Start TTLS command
-        server.starttls()
-        # Send EHLO command
-        server.ehlo()
-        # Login to Gmail
-        server.login(user, pwd)
-        # Send message
-        server.sendmail(user, recipient, msg.as_string())
-        # Close connection to server
-        server.close()
-
-        # If debug == 'True' print notifaction
-        if debug == 'True':
-            print('Email Sent')
-
-    # If email failed print error
-    except:
-        print('Error: Email failed to send')
-
 # Format the name ready for watchdog
 def formatName(string, videoformat):
-    return baseDir+'*'+string+'*'+videoformat
+    return '*'+string+'*'+videoformat
 
-# Grab all shows in config and format them for PatternMatchingEventHandler
+# Build the watchArray
 for show in shows:
-    show_name = show['name']
+    show_name = show[0]
 
     # Check show name for " "
     try:
@@ -395,32 +114,59 @@ for show in shows:
             if debug == 'True':
                 print(string)
 
-# If in debug print new line
-if debug == 'True':
-    print("\n")
 
-# Print error and exit
-def error(err):
-    sys.exit("Error: "+err)
+def addToLog(msg):
 
-# If in main file start watching direcotry
-if __name__ == '__main__':
-    observer = Observer()
+    global now
 
-    # Set watcher options
-    observer.schedule(HandleFileEvents(), baseDir, recursive=True)
+    preMsg="["+now.strftime("%Y-%m-%d %H:%M")+"] "
+    fileName=now.day+"_log.txt"
 
-    # Start watching
-    observer.start()
+    # Create Dir If Needed
+    if not os.path.exists(path):
+        open(path, 'a').close()
 
-    # Try to sleep for 1 second
+    # Write To File
+    with open(path, 'a') as f:
+        f.write(preMsg+msg+"\n")
+
+def moveTorrent():
+
+    global con
+    global utorrent
+    global torrentHash
+
     try:
-        while True:
-            time.sleep(1)
+        torrent = [t for h, t in sorted( utorrent.torrent_list( ).items( ), key = lambda x: getattr( x[1], "name" ), reverse = False ) if t.return_attr()["hash_code"] == torrentHash][0]
+        torrent_attr = torrent.return_attr()
+        torrent_name = torrent_attr["name"]
+        torrent_attr["attr"] = torrentparser.parse(torrent_name)
 
-    # On KeyboardInterrupt stop watching
-    except KeyboardInterrupt:
-        observer.stop()
+        if torrent_attr["progress"] != "100":
+            addToLog("ERROR: Torrent Not Finished, Skipping File Movement")
+            return
 
-    # Clean up the watch
-    observer.join()
+        # Remove From uTorrent & Server
+        torrent.remove()
+
+        # Sleep To give uTorrent Time
+        time.sleep(2)
+
+        # Create Dir If Needed
+        if not os.path.exists(path):
+            os.makedirs(path)
+
+        # Move File
+        os.rename(config["localDownloadFolder"]+"/"+torrent_name, path+"/"+torrent_name)
+
+        # Add To Log
+        addToLog("INFO: Torrent '"+torrent_name+"' Moved From '"+config["localDownloadFolder"]+"' to '"+path+"'")
+
+    except Exception as e:
+        addToLog("ERROR: Error While Attemping To Move Torrent!, "+str(e))
+
+    return
+
+# Check If Torrent Is In Config
+if any(show in torrentName for show in watchArray):
+    moveTorrent()
